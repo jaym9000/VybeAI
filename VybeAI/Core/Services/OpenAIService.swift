@@ -42,7 +42,10 @@ class OpenAIService: ObservableObject, OpenAIServiceProtocol {
                 return
             }
             
-            guard let imageData = sourceImage.jpegData(compressionQuality: 0.8) else {
+            // Preprocess the image
+            guard let processedImage = self.preprocessImage(sourceImage),
+                  let imageData = processedImage.pngData(),
+                  imageData.count <= 4 * 1024 * 1024 else { // 4MB limit
                 promise(.failure(OpenAIError.invalidImage))
                 return
             }
@@ -73,15 +76,10 @@ class OpenAIService: ObservableObject, OpenAIServiceProtocol {
             
             // Add image file
             body.append("--\(boundary)\r\n".data(using: .utf8)!)
-            body.append("Content-Disposition: form-data; name=\"image\"; filename=\"image.jpg\"\r\n".data(using: .utf8)!)
-            body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"image\"; filename=\"image.png\"\r\n".data(using: .utf8)!)
+            body.append("Content-Type: image/png\r\n\r\n".data(using: .utf8)!)
             body.append(imageData)
             body.append("\r\n".data(using: .utf8)!)
-            
-            // Add model parameter (dall-e-3 is the latest model)
-            body.append("--\(boundary)\r\n".data(using: .utf8)!)
-            body.append("Content-Disposition: form-data; name=\"model\"\r\n\r\n".data(using: .utf8)!)
-            body.append("dall-e-3\r\n".data(using: .utf8)!)
             
             // Add prompt parameter
             body.append("--\(boundary)\r\n".data(using: .utf8)!)
@@ -106,6 +104,7 @@ class OpenAIService: ObservableObject, OpenAIServiceProtocol {
             // Make the request
             URLSession.shared.dataTask(with: request) { data, response, error in
                 if let error = error {
+                    print("Network error: \(error.localizedDescription)")
                     promise(.failure(error))
                     return
                 }
@@ -113,6 +112,11 @@ class OpenAIService: ObservableObject, OpenAIServiceProtocol {
                 guard let httpResponse = response as? HTTPURLResponse,
                       (200...299).contains(httpResponse.statusCode) else {
                     if let httpResponse = response as? HTTPURLResponse {
+                        print("HTTP Error: \(httpResponse.statusCode)")
+                        if let data = data, let responseString = String(data: data, encoding: .utf8) {
+                            print("Response data: \(responseString)")
+                        }
+                        
                         switch httpResponse.statusCode {
                         case 401:
                             promise(.failure(OpenAIError.invalidAPIKey))
@@ -121,7 +125,14 @@ class OpenAIService: ObservableObject, OpenAIServiceProtocol {
                         case 500...599:
                             promise(.failure(OpenAIError.serverError))
                         default:
-                            promise(.failure(OpenAIError.unknownError))
+                            if let data = data,
+                               let errorJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                               let error = errorJson["error"] as? [String: Any],
+                               let message = error["message"] as? String {
+                                promise(.failure(OpenAIError.apiError(message)))
+                            } else {
+                                promise(.failure(OpenAIError.unknownError))
+                            }
                         }
                     } else {
                         promise(.failure(OpenAIError.unknownError))
@@ -229,6 +240,7 @@ class OpenAIService: ObservableObject, OpenAIServiceProtocol {
             // Make the request
             URLSession.shared.dataTask(with: request) { data, response, error in
                 if let error = error {
+                    print("Network error: \(error.localizedDescription)")
                     promise(.failure(error))
                     return
                 }
@@ -236,6 +248,11 @@ class OpenAIService: ObservableObject, OpenAIServiceProtocol {
                 guard let httpResponse = response as? HTTPURLResponse,
                       (200...299).contains(httpResponse.statusCode) else {
                     if let httpResponse = response as? HTTPURLResponse {
+                        print("HTTP Error: \(httpResponse.statusCode)")
+                        if let data = data, let responseString = String(data: data, encoding: .utf8) {
+                            print("Response data: \(responseString)")
+                        }
+                        
                         switch httpResponse.statusCode {
                         case 401:
                             promise(.failure(OpenAIError.invalidAPIKey))
@@ -469,6 +486,40 @@ class OpenAIService: ObservableObject, OpenAIServiceProtocol {
             attributedString.draw(with: CGRect(x: 20, y: size.height - 100, width: size.width - 40, height: 80), options: .usesLineFragmentOrigin, context: nil)
         }
     }
+    
+    private func preprocessImage(_ image: UIImage) -> UIImage? {
+        // Start with a reasonable target size
+        var maxDimension: CGFloat = 2048
+        var processedImage: UIImage?
+        
+        // Try progressively smaller sizes until we get under 4MB
+        while maxDimension >= 512 {
+            let scale = min(maxDimension / image.size.width, maxDimension / image.size.height)
+            let newSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+            
+            // Create a context with transparency (false = non-opaque = has alpha channel)
+            UIGraphicsBeginImageContextWithOptions(newSize, false, 1.0)
+            
+            // Clear the context with transparent background
+            UIRectFill(CGRect(origin: .zero, size: newSize))
+            
+            // Draw image preserving alpha channel
+            image.draw(in: CGRect(origin: .zero, size: newSize))
+            
+            if let resizedImage = UIGraphicsGetImageFromCurrentImageContext(),
+               let pngData = resizedImage.pngData(),
+               pngData.count <= 4 * 1024 * 1024 { // 4MB limit
+                processedImage = resizedImage
+                UIGraphicsEndImageContext()
+                break
+            }
+            
+            UIGraphicsEndImageContext()
+            maxDimension *= 0.75 // Reduce by 25% and try again
+        }
+        
+        return processedImage
+    }
 }
 
 // OpenAI API errors
@@ -484,17 +535,17 @@ enum OpenAIError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidAPIKey:
-            return "Invalid API key. Please check your OpenAI API key."
+            return "Invalid API key. Please check your configuration."
         case .invalidImage:
-            return "The source image is invalid."
+            return "The image must be in PNG format and less than 4MB in size. Please try again with a smaller image."
         case .invalidResponse:
-            return "Invalid response from the API."
+            return "Invalid response from the server. Please try again."
         case .rateLimitExceeded:
             return "Rate limit exceeded. Please try again later."
         case .serverError:
-            return "Server error. Please try again later."
+            return "Server error occurred. Please try again later."
         case .unknownError:
-            return "An unknown error occurred."
+            return "An unknown error occurred. Please try again."
         case .apiError(let message):
             return message
         }
