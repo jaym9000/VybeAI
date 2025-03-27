@@ -53,65 +53,46 @@ struct VybePhotoPicker: UIViewControllerRepresentable {
     }
 }
 
-// Custom camera picker using UIImagePickerController
+// Custom camera picker using UIImagePickerController with improved error handling
 struct VybeCameraPicker: UIViewControllerRepresentable {
     @Binding var selectedImage: UIImage?
     @Environment(\.dismiss) private var dismiss
-    @State private var showingCameraAlert = false
+    @State private var showingAlert = false
     @State private var alertMessage = ""
     
     func makeUIViewController(context: Context) -> UIImagePickerController {
         let picker = UIImagePickerController()
+        picker.delegate = context.coordinator
         
-        // First check if device has a camera
-        if !UIImagePickerController.isSourceTypeAvailable(.camera) {
-            DispatchQueue.main.async {
-                self.alertMessage = "This device doesn't have a camera."
-                self.showingCameraAlert = true
-                self.dismiss()
-            }
-            return picker
-        }
-        
-        // Check camera permission status
-        let status = AVCaptureDevice.authorizationStatus(for: .video)
-        
-        switch status {
-        case .authorized:
-            // Camera access already granted, set up the picker
+        // Check if camera is available on this device
+        if UIImagePickerController.isSourceTypeAvailable(.camera) {
             picker.sourceType = .camera
-            picker.delegate = context.coordinator
-            
-        case .notDetermined:
-            // Request camera permission
-            AVCaptureDevice.requestAccess(for: .video) { granted in
-                DispatchQueue.main.async {
-                    if granted {
-                        // Permission granted, but we need to dismiss and the user will need to try again
-                        picker.sourceType = .camera
-                        picker.delegate = context.coordinator
-                    } else {
-                        // Permission denied
-                        self.alertMessage = "VybeAI needs camera access to take pictures. Please enable it in Settings."
-                        self.showingCameraAlert = true
-                        self.dismiss()
+            // Check if accessing the camera is allowed
+            let cameraStatus = AVCaptureDevice.authorizationStatus(for: .video)
+            if cameraStatus != .authorized {
+                // Request camera access
+                AVCaptureDevice.requestAccess(for: .video) { granted in
+                    if !granted {
+                        DispatchQueue.main.async {
+                            self.dismiss()
+                            // Notify the user they need to enable camera access
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                if let url = URL(string: UIApplication.openSettingsURLString) {
+                                    UIApplication.shared.open(url)
+                                }
+                            }
+                        }
                     }
                 }
             }
-            
-        case .denied, .restricted:
-            // Camera access denied or restricted
+        } else {
+            // No camera available on this device
             DispatchQueue.main.async {
-                self.alertMessage = "VybeAI needs camera access to take pictures. Please enable it in Settings > Privacy > Camera."
-                self.showingCameraAlert = true
                 self.dismiss()
-            }
-            
-        @unknown default:
-            DispatchQueue.main.async {
-                self.alertMessage = "Unknown camera permission status. Please try again."
-                self.showingCameraAlert = true
-                self.dismiss()
+                NotificationCenter.default.post(
+                    name: Notification.Name("ShowCameraError"),
+                    object: "This device doesn't have a camera."
+                )
             }
         }
         
@@ -119,12 +100,7 @@ struct VybeCameraPicker: UIViewControllerRepresentable {
     }
     
     func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {
-        // Handle alert presentation
-        if showingCameraAlert {
-            DispatchQueue.main.async {
-                uiViewController.dismiss(animated: true)
-            }
-        }
+        // Nothing to update
     }
     
     func makeCoordinator() -> Coordinator {
@@ -143,12 +119,10 @@ struct VybeCameraPicker: UIViewControllerRepresentable {
                 parent.selectedImage = image
             }
             
-            picker.dismiss(animated: true)
             parent.dismiss()
         }
         
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            picker.dismiss(animated: true)
             parent.dismiss()
         }
     }

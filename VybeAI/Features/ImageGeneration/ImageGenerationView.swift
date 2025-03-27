@@ -25,6 +25,7 @@ struct ImageGenerationView: View {
     @EnvironmentObject private var appSettings: AppSettings
     @EnvironmentObject private var subscriptionManager: SubscriptionManager
     @State private var showCameraPermissionAlert = false
+    @State private var cameraErrorMessage = "Camera access is required to take photos."
     
     // Services are now injected rather than created internally
     private let imageCaptureService: ImageCaptureServiceProtocol
@@ -49,9 +50,42 @@ struct ImageGenerationView: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                // Background gradient
-                backgroundGradient
-                    .ignoresSafeArea()
+                // Enhanced background gradient
+                LinearGradient(
+                    gradient: Gradient(
+                        colors: colorScheme == .dark ?
+                            [Color(hex: "1A1A2E"), Color(hex: "16213E")] :
+                            [Color(hex: "F0F4FF"), Color(hex: "E6EEFF")]
+                    ),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
+                
+                // Animated background elements
+                GeometryReader { geo in
+                    ZStack {
+                        Circle()
+                            .fill(LinearGradient(
+                                gradient: Gradient(colors: [Color.purple.opacity(0.2), Color.blue.opacity(0.1)]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ))
+                            .frame(width: geo.size.width * 0.7, height: geo.size.width * 0.7)
+                            .blur(radius: 30)
+                            .offset(x: -geo.size.width * 0.2, y: -geo.size.height * 0.1)
+                        
+                        Circle()
+                            .fill(LinearGradient(
+                                gradient: Gradient(colors: [Color.blue.opacity(0.2), Color.purple.opacity(0.1)]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ))
+                            .frame(width: geo.size.width * 0.6, height: geo.size.width * 0.6)
+                            .blur(radius: 25)
+                            .offset(x: geo.size.width * 0.3, y: geo.size.height * 0.3)
+                    }
+                }
                 
                 // Main content
                 VStack(spacing: 0) {
@@ -64,7 +98,7 @@ struct ImageGenerationView: View {
                     // Main content area
                     ZStack {
                         if viewModel.imageModel.sourceImage == nil {
-                            // Image selection view
+                            // Enhanced image selection view
                             imageSelectionView
                                 .transition(.opacity)
                                 
@@ -130,7 +164,7 @@ struct ImageGenerationView: View {
                         .zIndex(3)
                 }
             }
-            .alert("Camera Access Required", isPresented: $showCameraPermissionAlert) {
+            .alert("Camera Error", isPresented: $showCameraPermissionAlert) {
                 Button("Cancel", role: .cancel) {}
                 Button("Open Settings") {
                     if let url = URL(string: UIApplication.openSettingsURLString) {
@@ -138,7 +172,7 @@ struct ImageGenerationView: View {
                     }
                 }
             } message: {
-                Text("VybeAI needs access to your camera to take photos. Please grant permission in your device settings.")
+                Text(cameraErrorMessage)
             }
             .alert("Saved Successfully", isPresented: $showingSaveSuccess) {
                 Button("OK", role: .cancel) { }
@@ -151,39 +185,42 @@ struct ImageGenerationView: View {
                 Text(saveErrorMessage)
             }
         }
-        .animation(.spring(), value: viewModel.imageModel.sourceImage)
-        .animation(.spring(), value: viewModel.imageModel.generatedImage)
-        .animation(.spring(), value: viewModel.imageModel.status)
-        .animation(.spring(), value: showingPromptSheet)
-        .animation(.spring(), value: showingHelpInfo)
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: viewModel.imageModel.sourceImage)
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: viewModel.imageModel.generatedImage)
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: viewModel.imageModel.status)
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showingPromptSheet)
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showingHelpInfo)
         .onChange(of: selectedImage) { oldImage, newImage in
             if let image = newImage {
                 viewModel.imageModel.sourceImage = image
+            }
+        }
+        .onAppear {
+            // Add notification observer for camera errors
+            NotificationCenter.default.addObserver(
+                forName: Notification.Name("ShowCameraError"),
+                object: nil,
+                queue: .main
+            ) { notification in
+                if let message = notification.object as? String {
+                    self.cameraErrorMessage = message
+                } else {
+                    self.cameraErrorMessage = "There was a problem accessing the camera."
+                }
+                self.showCameraPermissionAlert = true
             }
         }
     }
     
     // MARK: - Components
     
-    // Gradient background similar to TikTok/Snapchat
-    var backgroundGradient: some View {
-        LinearGradient(
-            gradient: Gradient(
-                colors: colorScheme == .dark ?
-                    [Color(hex: "121212"), Color(hex: "1D1D1D")] :
-                    [Color(hex: "F8F8F8"), Color.white]
-            ),
-            startPoint: .top,
-            endPoint: .bottom
-        )
-    }
-    
     // Header with title and buttons
     private var header: some View {
         HStack {
             Text("VybeAI")
-                .font(.system(size: 28, weight: .bold, design: .rounded))
+                .font(.system(size: 32, weight: .bold, design: .rounded))
                 .foregroundColor(colorScheme == .dark ? .white : Color(hex: "333333"))
+                .shadow(color: colorScheme == .dark ? Color.purple.opacity(0.5) : Color.blue.opacity(0.3), radius: 2, x: 0, y: 1)
             
             Spacer()
             
@@ -194,10 +231,13 @@ struct ImageGenerationView: View {
                 Image(systemName: "clock.arrow.circlepath")
                     .font(.system(size: 20))
                     .foregroundColor(colorScheme == .dark ? .white : Color(hex: "333333"))
-                    .padding(8)
+                    .padding(10)
                     .background(
                         Circle()
-                            .fill(colorScheme == .dark ? Color(hex: "2C2C2E") : Color(hex: "F2F2F7"))
+                            .fill(colorScheme == .dark ? 
+                                  Color(hex: "2C2C4E").opacity(0.8) : 
+                                  Color(hex: "F2F2FF").opacity(0.8))
+                            .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
                     )
             }
             .buttonStyle(PlainButtonStyle())
@@ -210,10 +250,13 @@ struct ImageGenerationView: View {
                 Image(systemName: "bubble.left.and.bubble.right.fill")
                     .font(.system(size: 20))
                     .foregroundColor(colorScheme == .dark ? .white : Color(hex: "333333"))
-                    .padding(8)
+                    .padding(10)
                     .background(
                         Circle()
-                            .fill(colorScheme == .dark ? Color(hex: "2C2C2E") : Color(hex: "F2F2F7"))
+                            .fill(colorScheme == .dark ? 
+                                  Color(hex: "2C2C4E").opacity(0.8) : 
+                                  Color(hex: "F2F2FF").opacity(0.8))
+                            .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
                     )
             }
             .buttonStyle(PlainButtonStyle())
@@ -227,10 +270,13 @@ struct ImageGenerationView: View {
                 Image(systemName: "gearshape.fill")
                     .font(.system(size: 20))
                     .foregroundColor(colorScheme == .dark ? .white : Color(hex: "333333"))
-                    .padding(8)
+                    .padding(10)
                     .background(
                         Circle()
-                            .fill(colorScheme == .dark ? Color(hex: "2C2C2E") : Color(hex: "F2F2F7"))
+                            .fill(colorScheme == .dark ? 
+                                  Color(hex: "2C2C4E").opacity(0.8) : 
+                                  Color(hex: "F2F2FF").opacity(0.8))
+                            .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
                     )
             }
         }
@@ -360,74 +406,195 @@ struct ImageGenerationView: View {
         VStack(spacing: 32) {
             // App icon/branding
             VStack(spacing: 16) {
-                Image(systemName: "wand.and.stars")
-                    .font(.system(size: 64))
-                    .foregroundColor(.purple)
-                    .padding()
-                    .background(
-                        Circle()
-                            .fill(Color.purple.opacity(0.15))
-                            .frame(width: 120, height: 120)
-                    )
+                ZStack {
+                    // Background circles
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(colors: [Color.purple.opacity(0.7), Color.blue.opacity(0.5)]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 120, height: 120)
+                        .blur(radius: 12)
+                    
+                    // Icon
+                    Image(systemName: "wand.and.stars")
+                        .font(.system(size: 64))
+                        .foregroundColor(.white)
+                        .shadow(color: Color.purple.opacity(0.8), radius: 8, x: 0, y: 4)
+                }
+                .padding(.bottom, 8)
                 
-                Text("Transform your photos with AI")
-                    .font(.title2)
-                    .fontWeight(.medium)
+                Text("Transform Your Photos")
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundColor(colorScheme == .dark ? .white : Color(hex: "333333"))
                     .multilineTextAlignment(.center)
                 
-                Text("Create viral-style content in seconds")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
+                Text("Create AI-powered viral-style content in seconds")
+                    .font(.system(size: 16))
+                    .foregroundColor(colorScheme == .dark ? .white.opacity(0.8) : Color(hex: "666666"))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
+                    .padding(.bottom, 8)
             }
             
-            // Selection buttons
+            // Choice tabs
             VStack(spacing: 16) {
-                Button(action: {
-                    checkCameraPermissionAndProceed()
-                }) {
-                    HStack {
-                        Image(systemName: "camera.fill")
-                            .font(.headline)
-                        Text("Take a Photo")
-                            .fontWeight(.semibold)
-                    }
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 56)
-                    .background(
-                        LinearGradient(
-                            gradient: Gradient(colors: [Color.purple, Color.blue]),
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .cornerRadius(28)
-                }
+                Text("Choose Your Method")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(colorScheme == .dark ? .white.opacity(0.9) : Color(hex: "444444"))
                 
-                Button(action: {
-                    // Open photo library
-                    imageSource = .photoLibrary
-                    showingImagePicker = true
-                }) {
-                    HStack {
-                        Image(systemName: "photo.on.rectangle")
-                            .font(.headline)
-                        Text("Choose from Library")
-                            .fontWeight(.semibold)
+                VStack(spacing: 20) {
+                    // Chat button - added as an alternative method
+                    NavigationLink(destination: ChatToImageView(openAIService: openAIService)
+                        .environmentObject(appSettings)
+                        .environmentObject(subscriptionManager)) {
+                        HStack {
+                            Image(systemName: "bubble.left.and.text.bubble.right.fill")
+                                .font(.system(size: 24))
+                                .foregroundColor(.white)
+                                .frame(width: 48, height: 48)
+                                .background(
+                                    Circle()
+                                        .fill(
+                                            LinearGradient(
+                                                gradient: Gradient(colors: [Color.purple, Color.blue]),
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        )
+                                )
+                            
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Chat To Image")
+                                    .font(.headline)
+                                    .foregroundColor(colorScheme == .dark ? .white : Color(hex: "333333"))
+                                
+                                Text("Describe your idea in a conversation")
+                                    .font(.subheadline)
+                                    .foregroundColor(colorScheme == .dark ? .white.opacity(0.7) : Color(hex: "666666"))
+                            }
+                            
+                            Spacer()
+                            
+                            Image(systemName: "chevron.right")
+                                .foregroundColor(colorScheme == .dark ? .white.opacity(0.5) : Color(hex: "999999"))
+                        }
+                        .padding()
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(colorScheme == .dark ? 
+                                      Color(hex: "2A2A3E").opacity(0.7) : 
+                                      Color.white.opacity(0.7))
+                                .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
+                        )
                     }
-                    .foregroundColor(colorScheme == .dark ? .white : Color(hex: "333333"))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 56)
-                    .background(
-                        colorScheme == .dark ? Color(hex: "2C2C2E") : Color(hex: "F2F2F7")
-                    )
-                    .cornerRadius(28)
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    Text("OR")
+                        .font(.subheadline)
+                        .foregroundColor(colorScheme == .dark ? .white.opacity(0.5) : Color(hex: "999999"))
+                        .frame(maxWidth: .infinity, alignment: .center)
+                    
+                    // Camera button
+                    Button(action: {
+                        checkCameraPermissionAndProceed()
+                    }) {
+                        HStack {
+                            Image(systemName: "camera.fill")
+                                .font(.system(size: 24))
+                                .foregroundColor(.white)
+                                .frame(width: 48, height: 48)
+                                .background(
+                                    Circle()
+                                        .fill(
+                                            LinearGradient(
+                                                gradient: Gradient(colors: [Color.blue, Color.purple]),
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        )
+                                )
+                            
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Take a Photo")
+                                    .font(.headline)
+                                    .foregroundColor(colorScheme == .dark ? .white : Color(hex: "333333"))
+                                
+                                Text("Use your camera to capture an image")
+                                    .font(.subheadline)
+                                    .foregroundColor(colorScheme == .dark ? .white.opacity(0.7) : Color(hex: "666666"))
+                            }
+                            
+                            Spacer()
+                            
+                            Image(systemName: "chevron.right")
+                                .foregroundColor(colorScheme == .dark ? .white.opacity(0.5) : Color(hex: "999999"))
+                        }
+                        .padding()
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(colorScheme == .dark ? 
+                                      Color(hex: "2A2A3E").opacity(0.7) : 
+                                      Color.white.opacity(0.7))
+                                .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    // Photo Library button
+                    Button(action: {
+                        imageSource = .photoLibrary
+                        showingImagePicker = true
+                    }) {
+                        HStack {
+                            Image(systemName: "photo.on.rectangle.angled.fill")
+                                .font(.system(size: 24))
+                                .foregroundColor(.white)
+                                .frame(width: 48, height: 48)
+                                .background(
+                                    Circle()
+                                        .fill(
+                                            LinearGradient(
+                                                gradient: Gradient(colors: [Color(hex: "4CC9F0"), Color(hex: "4361EE")]),
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        )
+                                )
+                            
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Choose from Library")
+                                    .font(.headline)
+                                    .foregroundColor(colorScheme == .dark ? .white : Color(hex: "333333"))
+                                
+                                Text("Select a photo from your gallery")
+                                    .font(.subheadline)
+                                    .foregroundColor(colorScheme == .dark ? .white.opacity(0.7) : Color(hex: "666666"))
+                            }
+                            
+                            Spacer()
+                            
+                            Image(systemName: "chevron.right")
+                                .foregroundColor(colorScheme == .dark ? .white.opacity(0.5) : Color(hex: "999999"))
+                        }
+                        .padding()
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(colorScheme == .dark ? 
+                                      Color(hex: "2A2A3E").opacity(0.7) : 
+                                      Color.white.opacity(0.7))
+                                .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
                 }
+                .padding(.horizontal, 4)
             }
-            .padding(.horizontal)
         }
+        .padding(.bottom, 40)
     }
     
     // Processing/Selected Image View
@@ -743,6 +910,7 @@ struct ImageGenerationView: View {
                         imageSource = .camera
                         showingCameraView = true
                     } else {
+                        cameraErrorMessage = "VybeAI needs access to your camera to take photos. Please grant permission in your device settings."
                         showCameraPermissionAlert = true
                     }
                 }
@@ -750,10 +918,12 @@ struct ImageGenerationView: View {
             
         case .denied, .restricted:
             // Show alert to direct to settings
+            cameraErrorMessage = "VybeAI needs access to your camera to take photos. Please enable it in Settings > Privacy > Camera."
             showCameraPermissionAlert = true
             
         @unknown default:
             // Handle future cases
+            cameraErrorMessage = "Unknown camera permission status. Please try again."
             showCameraPermissionAlert = true
         }
     }
