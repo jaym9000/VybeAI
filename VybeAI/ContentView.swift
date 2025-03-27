@@ -8,14 +8,17 @@
 import SwiftUI
 
 struct ContentView: View {
+    @StateObject private var appSettings = AppSettings()
+    @StateObject private var subscriptionManager = SubscriptionManager()
+    @StateObject private var openAIService = OpenAIService()
+    @StateObject private var imageCaptureService = ImageCaptureService()
+    
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
-        }
-        .padding()
+        MainView()
+            .environmentObject(appSettings)
+            .environmentObject(subscriptionManager)
+            .environmentObject(openAIService)
+            .environmentObject(imageCaptureService)
     }
 }
 
