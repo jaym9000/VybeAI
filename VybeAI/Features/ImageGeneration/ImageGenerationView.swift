@@ -10,6 +10,7 @@ import AVFoundation
 
 struct ImageGenerationView: View {
     @StateObject private var viewModel: ImageGenerationViewModel
+    @StateObject private var chatViewModel: ChatToImageViewModel
     @State private var showingSaveSuccess = false
     @State private var showingSaveError = false
     @State private var saveErrorMessage = ""
@@ -26,6 +27,10 @@ struct ImageGenerationView: View {
     @EnvironmentObject private var subscriptionManager: SubscriptionManager
     @State private var showCameraPermissionAlert = false
     @State private var cameraErrorMessage = "Camera access is required to take photos."
+    @State private var chatPrompt: String = ""
+    @FocusState private var isChatFieldFocused: Bool
+    @State private var keyboardHeight: CGFloat = 0
+    @State private var scrollViewID = UUID()
     
     // Services are now injected rather than created internally
     private let imageCaptureService: ImageCaptureServiceProtocol
@@ -39,12 +44,14 @@ struct ImageGenerationView: View {
         self.openAIService = openAIService
         self.imageCaptureService = imageCaptureService
         
-        // Initialize the view model with injected services
+        // Initialize the view models with injected services
         _viewModel = StateObject(wrappedValue: ImageGenerationViewModel(
             openAIService: openAIService,
             imageCaptureService: imageCaptureService,
             subscriptionManager: subscriptionManager
         ))
+        
+        _chatViewModel = StateObject(wrappedValue: ChatToImageViewModel(openAIService: openAIService))
     }
     
     var body: some View {
@@ -243,28 +250,8 @@ struct ImageGenerationView: View {
             .buttonStyle(PlainButtonStyle())
             .padding(.trailing, 8)
             
-            // Chat button
-            NavigationLink(destination: ChatToImageView(openAIService: openAIService)
-                .environmentObject(appSettings)
-                .environmentObject(subscriptionManager)) {
-                Image(systemName: "bubble.left.and.bubble.right.fill")
-                    .font(.system(size: 20))
-                    .foregroundColor(colorScheme == .dark ? .white : Color(hex: "333333"))
-                    .padding(10)
-                    .background(
-                        Circle()
-                            .fill(colorScheme == .dark ? 
-                                  Color(hex: "2C2C4E").opacity(0.8) : 
-                                  Color(hex: "F2F2FF").opacity(0.8))
-                            .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
-                    )
-            }
-            .buttonStyle(PlainButtonStyle())
-            .padding(.trailing, 8)
-            
             // Settings button
             Button(action: {
-                // Post notification to show settings
                 NotificationCenter.default.post(name: Notification.Name("ShowSettings"), object: nil)
             }) {
                 Image(systemName: "gearshape.fill")
@@ -440,6 +427,31 @@ struct ImageGenerationView: View {
                     .padding(.bottom, 8)
             }
             
+            // Chat messages area
+            if !chatViewModel.messages.isEmpty {
+                ScrollViewReader { scrollProxy in
+                    ScrollView {
+                        LazyVStack(spacing: 16) {
+                            ForEach(chatViewModel.messages) { message in
+                                MessageView(message: message, isGenerating: chatViewModel.isGenerating)
+                                    .transition(.asymmetric(
+                                        insertion: .scale(scale: 0.9).combined(with: .opacity),
+                                        removal: .opacity
+                                    ))
+                            }
+                        }
+                        .padding(.horizontal)
+                        .padding(.vertical, 12)
+                        .id(scrollViewID)
+                    }
+                    .frame(maxHeight: 200)
+                    .scrollIndicators(.hidden)
+                    .onChange(of: chatViewModel.messages.count) { _, _ in
+                        scrollToBottom(proxy: scrollProxy)
+                    }
+                }
+            }
+            
             // Choice tabs
             VStack(spacing: 16) {
                 Text("Choose Your Method")
@@ -447,12 +459,25 @@ struct ImageGenerationView: View {
                     .foregroundColor(colorScheme == .dark ? .white.opacity(0.9) : Color(hex: "444444"))
                 
                 VStack(spacing: 20) {
-                    // Chat button - added as an alternative method
-                    NavigationLink(destination: ChatToImageView(openAIService: openAIService)
-                        .environmentObject(appSettings)
-                        .environmentObject(subscriptionManager)) {
-                        HStack {
-                            Image(systemName: "bubble.left.and.text.bubble.right.fill")
+                    // Chat input field
+                    HStack(spacing: 12) {
+                        TextField("Describe an image...", text: $chatPrompt)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 24)
+                                    .fill(colorScheme == .dark ? 
+                                          Color(hex: "2A2A3E").opacity(0.7) : 
+                                          Color.white.opacity(0.7))
+                                    .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
+                            )
+                            .focused($isChatFieldFocused)
+                        
+                        // Send button
+                        Button {
+                            sendChatMessage()
+                        } label: {
+                            Image(systemName: "arrow.up.circle.fill")
                                 .font(.system(size: 24))
                                 .foregroundColor(.white)
                                 .frame(width: 48, height: 48)
@@ -465,33 +490,11 @@ struct ImageGenerationView: View {
                                                 endPoint: .bottomTrailing
                                             )
                                         )
+                                        .shadow(color: Color.black.opacity(0.15), radius: 4, x: 0, y: 2)
                                 )
-                            
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Chat To Image")
-                                    .font(.headline)
-                                    .foregroundColor(colorScheme == .dark ? .white : Color(hex: "333333"))
-                                
-                                Text("Describe your idea in a conversation")
-                                    .font(.subheadline)
-                                    .foregroundColor(colorScheme == .dark ? .white.opacity(0.7) : Color(hex: "666666"))
-                            }
-                            
-                            Spacer()
-                            
-                            Image(systemName: "chevron.right")
-                                .foregroundColor(colorScheme == .dark ? .white.opacity(0.5) : Color(hex: "999999"))
                         }
-                        .padding()
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(colorScheme == .dark ? 
-                                      Color(hex: "2A2A3E").opacity(0.7) : 
-                                      Color.white.opacity(0.7))
-                                .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
-                        )
                     }
-                    .buttonStyle(PlainButtonStyle())
+                    .padding(.horizontal, 4)
                     
                     Text("OR")
                         .font(.subheadline)
@@ -960,6 +963,36 @@ struct ImageGenerationView: View {
         if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
            let rootViewController = windowScene.windows.first?.rootViewController {
             rootViewController.present(activityVC, animated: true)
+        }
+    }
+    
+    // Add chat message sending function
+    private func sendChatMessage() {
+        guard !chatPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        
+        // Check if the user has used all their free generations
+        if !subscriptionManager.isSubscribed && subscriptionManager.generationsRemaining <= 0 {
+            viewModel.showPaywall = true
+            return
+        }
+        
+        // Decrement generations for free users
+        if !subscriptionManager.isSubscribed {
+            subscriptionManager.generationsRemaining -= 1
+        }
+        
+        // Send the message to the chat view model
+        chatViewModel.sendMessage(chatPrompt)
+        
+        // Clear the prompt after sending
+        chatPrompt = ""
+    }
+    
+    private func scrollToBottom(proxy: ScrollViewProxy) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            withAnimation {
+                proxy.scrollTo(scrollViewID, anchor: .bottom)
+            }
         }
     }
 }
